@@ -468,7 +468,10 @@ class DDSRLActionProvider(ActionProvider):
         """Get action from DDS"""
         try:
             full_action = self._full_action_buf
-            full_action.zero_()
+            # Default all joints to their rest pose so uncontrolled joints
+            # (arms, wrists, fingers) hold a safe standing posture instead of
+            # collapsing to 0 rad when no DDS teleop commands are present.
+            full_action.copy_(self.default_action_positions[0])
             action_data = self.run_policy()
             if self.wait_for_keyboard_start and not self._received_user_command:
                 full_action.copy_(self.default_action_positions[0])

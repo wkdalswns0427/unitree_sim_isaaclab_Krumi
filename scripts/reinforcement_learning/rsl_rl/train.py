@@ -56,12 +56,46 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import torch
 from rsl_rl.runners import OnPolicyRunner
+from torch.distributions import Normal
 
 from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
 
 import tasks  # noqa: F401
+
+
+def _patch_rsl_policy_distribution_safety():
+    """Patch rsl_rl ActorCritic distribution update to avoid invalid std crashes."""
+    try:
+        import rsl_rl.modules.actor_critic as actor_critic_mod
+    except Exception:
+        return
+
+    actor_critic_cls = getattr(actor_critic_mod, "ActorCritic", None)
+    if actor_critic_cls is None or getattr(actor_critic_cls, "_unitree_safe_std_patch", False):
+        return
+
+    def _safe_update_distribution(self, obs):
+        mean = self.actor(obs)
+        if self.noise_std_type == "scalar":
+            std = self.std.expand_as(mean)
+        elif self.noise_std_type == "log":
+            std = torch.exp(self.log_std).expand_as(mean)
+        else:
+            raise ValueError(
+                f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'"
+            )
+
+        # Keep distribution numerically valid even if upstream updates explode transiently.
+        mean = torch.nan_to_num(mean, nan=0.0, posinf=1.0e3, neginf=-1.0e3)
+        std = torch.nan_to_num(std, nan=1.0, posinf=1.0, neginf=1.0)
+        std = torch.clamp(std, min=1.0e-6, max=10.0)
+        self.distribution = Normal(mean, std)
+
+    actor_critic_cls.update_distribution = _safe_update_distribution
+    actor_critic_cls._unitree_safe_std_patch = True
+    print("[INFO] Applied safe-std patch for rsl_rl ActorCritic distribution.")
 
 
 def _extract_policy_and_normalizer(runner):
@@ -80,6 +114,8 @@ def _extract_policy_and_normalizer(runner):
 
 
 def main():
+    _patch_rsl_policy_distribution_safety()
+
     env_cfg = load_cfg_from_registry(args_cli.task, "env_cfg_entry_point")
     agent_cfg = load_cfg_from_registry(args_cli.task, args_cli.agent)
 
@@ -89,12 +125,24 @@ def main():
 
     agent_cfg.seed = args_cli.seed
     agent_cfg.device = args_cli.device if args_cli.device is not None else agent_cfg.device
+    # Guard against negative/invalid policy std in rsl_rl ActorCritic.
+    if hasattr(agent_cfg, "policy"):
+        if getattr(agent_cfg.policy, "noise_std_type", None) != "log":
+            agent_cfg.policy.noise_std_type = "log"
+        if hasattr(agent_cfg.policy, "init_noise_std") and agent_cfg.policy.init_noise_std <= 0.0:
+            agent_cfg.policy.init_noise_std = 1.0
     if args_cli.max_iterations is not None:
         agent_cfg.max_iterations = args_cli.max_iterations
     if args_cli.experiment_name is not None:
         agent_cfg.experiment_name = args_cli.experiment_name
     if args_cli.run_name is not None:
         agent_cfg.run_name = args_cli.run_name
+    if hasattr(agent_cfg, "policy"):
+        print(
+            "[INFO] Policy noise config:",
+            f"noise_std_type={getattr(agent_cfg.policy, 'noise_std_type', None)}",
+            f"init_noise_std={getattr(agent_cfg.policy, 'init_noise_std', None)}",
+        )
 
     # Keep training lightweight and avoid camera shared-memory paths unless video recording is requested.
     if not args_cli.video and hasattr(env_cfg, "scene"):

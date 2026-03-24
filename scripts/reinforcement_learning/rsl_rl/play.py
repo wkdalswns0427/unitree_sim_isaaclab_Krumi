@@ -100,11 +100,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    if not args_cli.headless and env_cfg.scene.num_envs > 1:
+        print(
+            f"[WARN] Play mode with num_envs={env_cfg.scene.num_envs} can place robots outside the default viewport. "
+            "Use --num_envs 1 for debugging visibility."
+        )
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+
+    # Keep play lightweight when not recording and avoid camera-related side effects.
+    if not args_cli.video and hasattr(env_cfg, "scene"):
+        for camera_name in ("front_camera", "left_wrist_camera", "right_wrist_camera", "robot_camera", "world_camera"):
+            if hasattr(env_cfg.scene, camera_name):
+                setattr(env_cfg.scene, camera_name, None)
+        if (
+            hasattr(env_cfg, "observations")
+            and hasattr(env_cfg.observations, "policy")
+            and hasattr(env_cfg.observations.policy, "camera_image")
+        ):
+            env_cfg.observations.policy.camera_image = None
+
+    # Helpful default viewer pose for H12 move-cylinder scene in GUI mode.
+    if not args_cli.headless and hasattr(env_cfg, "viewer"):
+        env_cfg.viewer.eye = (-6.0, -6.5, 2.2)
+        env_cfg.viewer.lookat = (-3.9, -2.8, 0.9)
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
