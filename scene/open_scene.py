@@ -46,10 +46,39 @@ def main() -> None:
         if not os.path.exists(scene_path):
             raise FileNotFoundError(f"Scene USD not found: {scene_path}")
 
+        import omni.timeline
+
         usd_ctx = omni.usd.get_context()
         ok = usd_ctx.open_stage(scene_path)
         if not ok:
             raise RuntimeError(f"Failed to open scene: {scene_path}")
+
+        stage = usd_ctx.get_stage()
+
+        # Set H1-2 to basic knee-bent stance.
+        h12_stance = {
+            "left_hip_pitch_joint":  -0.20,
+            "right_hip_pitch_joint": -0.20,
+            "left_knee_joint":        0.42,
+            "right_knee_joint":       0.42,
+            "left_ankle_pitch_joint": -0.23,
+            "right_ankle_pitch_joint":-0.23,
+        }
+        h12_joints_base = "/h1_2_with_FTP_hand/joints"
+        for joint_name, target in h12_stance.items():
+            prim = stage.GetPrimAtPath(f"{h12_joints_base}/{joint_name}")
+            if prim.IsValid():
+                attr = prim.GetAttribute("drive:angular:physics:targetPosition")
+                if attr.IsValid():
+                    attr.Set(float(target))
+                attr_kp = prim.GetAttribute("drive:angular:physics:stiffness")
+                if attr_kp.IsValid():
+                    attr_kp.Set(140.0)
+                attr_kd = prim.GetAttribute("drive:angular:physics:damping")
+                if attr_kd.IsValid():
+                    attr_kd.Set(10.0)
+
+        omni.timeline.get_timeline_interface().play()
 
         print(f"[INFO] Opened scene: {scene_path}")
         while simulation_app.is_running():

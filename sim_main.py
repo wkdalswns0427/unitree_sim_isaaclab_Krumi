@@ -437,7 +437,7 @@ def main():
     print(f"\ncreate action provider: {args_cli.action_source}...")
     try:
         print(f"args_cli.task: {args_cli.task}")
-        if not args_cli.replay_data and ("Wholebody" in args_cli.task or args_cli.enable_wholebody_dds):
+        if not args_cli.replay_data and ("wholebody" in args_cli.task.lower() or args_cli.enable_wholebody_dds):
             args_cli.action_source = "dds_wholebody"
             args_cli.enable_wholebody_dds = True
             control_config.use_rl_action_mode = True

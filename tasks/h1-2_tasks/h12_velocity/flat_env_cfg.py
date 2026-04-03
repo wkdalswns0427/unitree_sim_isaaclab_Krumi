@@ -14,8 +14,8 @@ class H12FlatEnvCfg(H12RoughEnvCfg):
         self.observations.policy.height_scan = None
         self.curriculum.terrain_levels = None
 
-        self.rewards.feet_air_time.weight = 1.0
-        self.rewards.feet_air_time.params["threshold"] = 0.6
+        self.rewards.feet_air_time.weight = 0.5
+        self.rewards.feet_air_time.params["threshold"] = 0.3
 
 
 @configclass

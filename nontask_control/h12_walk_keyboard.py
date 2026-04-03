@@ -15,6 +15,21 @@ import argparse
 import os
 import select
 import sys
+
+# Disable iceoryx SHM transport — prevents dds_write.c assertion when ROS
+# iceoryx is installed. ChannelFactory.Init() passes config directly to
+# Domain(id, config), so CYCLONEDDS_URI env var is ignored; patch the SDK
+# config strings directly before any DDS domain is created.
+try:
+    import unitree_sdk2py.core.channel as _ch
+    _shm_off = "<SharedMemory><Enable>false</Enable></SharedMemory>"
+    for _attr in ("ChannelConfigAutoDetermine", "ChannelConfigHasInterface"):
+        _cfg = getattr(_ch, _attr, None)
+        if _cfg and _shm_off not in _cfg:
+            setattr(_ch, _attr, _cfg.replace("</Domain>", f"{_shm_off}</Domain>"))
+    del _ch, _shm_off, _attr, _cfg
+except Exception:
+    pass
 import termios
 import threading
 import time

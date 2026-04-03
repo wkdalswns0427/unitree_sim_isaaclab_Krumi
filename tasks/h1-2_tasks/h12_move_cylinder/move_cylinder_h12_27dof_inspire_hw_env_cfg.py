@@ -6,6 +6,7 @@ import os
 import isaaclab.envs.mdp as base_mdp
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -51,7 +52,10 @@ class ObjectTableSceneCfg(TableCylinderSceneCfgWH):
     # experiences gravity and must learn to balance. The non-floating variant
     # has its root anchored to the world and cannot walk.
     robot: ArticulationCfg = H12RobotPresets.h12_27dof_inspire_wholebody_floating(
-        init_pos=(-3.9, -2.81811, 1.00),
+        # Moved ~0.6 m closer to the cylinder (was -3.9).  The robot still needs
+        # to walk a short distance, which is appropriate for curriculum stage 1+,
+        # but the distance is no longer so large that the approach reward saturates.
+        init_pos=(-3.3, -2.81811, 1.00),
         init_rot=(1, 0, 0, 0),
     )
 
@@ -152,13 +156,13 @@ class TerminationsCfg:
 
 @configclass
 class RewardsCfg:
-    reward = RewTerm(
-        func=mdp.compute_reward,
+    # ── Curriculum stage 2 (HOLD): placement reward ─────────────────────────
+    # Gated — zero until the policy has learned to grasp.
+    placement = RewTerm(
+        func=mdp.placement_reward,
         weight=1.0,
         params={
-            # Disable DDS reward publishing for RL training runs.
             "enable_dds": False,
-            # Goal: place 1 ft to the right (+x) from the object default location.
             "min_x": _MIN_X,
             "max_x": _MAX_X,
             "min_y": _MIN_Y,
@@ -179,53 +183,74 @@ class RewardsCfg:
             "dense_z_scale": 10.0,
         },
     )
-    # Heavy penalty for falling; creates a strong gradient to stay upright.
-    termination_penalty = RewTerm(
-        func=base_mdp.is_terminated,
-        weight=-50.0,
+    # ── Curriculum stage 1 (GRASP): fingertip reward ────────────────────────
+    # Gated — zero until wrist is reliably near the cylinder.
+    fingertip_grasp = RewTerm(
+        func=mdp.fingertip_grasp_reward,
+        weight=2.0,
+        params={"proximity_threshold": 0.40, "grasp_std": 0.10},
     )
-    # Penalise tilt away from upright (projected gravity deviates from [0,0,-1]).
-    flat_orientation = RewTerm(
-        func=base_mdp.flat_orientation_l2,
-        weight=-2.0,
-    )
-    # Penalise vertical root velocity to discourage bouncing / falling.
-    lin_vel_z = RewTerm(
-        func=base_mdp.lin_vel_z_l2,
-        weight=-1.0,
-    )
-    # Penalise rapid joint acceleration to encourage smooth, stable motion.
-    action_rate = RewTerm(
-        func=base_mdp.action_rate_l2,
-        weight=-0.005,
-    )
-    # Dense reaching reward: pulls the policy toward the cylinder before the
-    # sparse placement reward fires. joint_deviation_arms is intentionally
-    # omitted — penalising arm movement would prevent the policy from ever
-    # reaching the object.
-    wrist_to_object = RewTerm(
-        func=mdp.wrist_to_object_reward,
-        weight=1.0,
-        params={"std": 1.5},
-    )
+    # ── Always active: balance + approach ───────────────────────────────────
+    # base_to_object (std=1.0): steep enough that the policy gets real gradient
+    # to walk forward.  At 0.72 m → reward 0.49, at 0.3 m → 0.74 (Δ=0.25).
     base_to_object = RewTerm(
         func=mdp.base_to_object_reward,
-        weight=0.8,
-        params={"std": 2.0},
+        weight=1.0,
+        params={"std": 1.0},
     )
-    # === Balance rewards ===
-    # Positive reward each step the robot stays upright — counteracts
-    # the termination penalty so the policy learns to survive.
+    # wrist_to_object (std=0.3): nearly zero when far away, so the policy
+    # keeps arms relaxed while walking.  Strong gradient only within ~40 cm
+    # so the arm extends naturally once the base is close.
+    wrist_to_object = RewTerm(
+        func=mdp.wrist_to_object_reward,
+        weight=1.5,
+        params={"std": 0.3},
+    )
     alive = RewTerm(
         func=base_mdp.is_alive,
         weight=2.0,
     )
-    # Keep hip joints near default standing pose for stability.
+    termination_penalty = RewTerm(
+        func=base_mdp.is_terminated,
+        weight=-50.0,
+    )
+    flat_orientation = RewTerm(
+        func=base_mdp.flat_orientation_l2,
+        weight=-2.0,
+    )
+    lin_vel_z = RewTerm(
+        func=base_mdp.lin_vel_z_l2,
+        weight=-1.0,
+    )
+    action_rate = RewTerm(
+        func=base_mdp.action_rate_l2,
+        weight=-0.005,
+    )
     joint_deviation_hip = RewTerm(
         func=base_mdp.joint_deviation_l1,
         weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint"])},
     )
+    # Penalise arm joints deviating from default pose — prevents the policy
+    # from twisting arms into unnatural configurations for marginal reward.
+    joint_deviation_arm = RewTerm(
+        func=base_mdp.joint_deviation_l1,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_shoulder_.*_joint", ".*_elbow_joint"])},
+    )
+
+
+@configclass
+class CurriculumCfg:
+    """Four-stage curriculum: balance → approach → grasp → hold.
+
+    The :func:`~mdp.advance_curriculum_stage` function is called every step by
+    the :class:`~isaaclab.managers.CurriculumManager`.  It advances each
+    environment's stage independently when the success condition for that stage
+    is met for a sustained number of consecutive steps.  Stage progress is
+    preserved across episode resets.
+    """
+    stage_advance = CurrTerm(func=mdp.advance_curriculum_stage)
 
 
 def _reset_object_self(env) -> None:
@@ -298,7 +323,7 @@ class MoveCylinderH1227dofInspireWholebodyEnvCfg(ManagerBasedRLEnvCfg):
     events = EventCfg()
     commands = None
     rewards: RewardsCfg = RewardsCfg()
-    curriculum = None
+    curriculum: CurriculumCfg = CurriculumCfg()
 
     def __post_init__(self):
         self.decimation = 4

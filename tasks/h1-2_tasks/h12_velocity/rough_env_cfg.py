@@ -120,6 +120,7 @@ class H12RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             ".*_ankle_pitch_joint": 100.0,
             ".*_ankle_roll_joint": 100.0,
         }
+        robot_cfg.actuators["feet"].stiffness = 40.0
         robot_cfg.actuators["feet"].damping = 4.0
         self.scene.robot = robot_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
         if self.scene.height_scanner is not None:
@@ -153,11 +154,11 @@ class H12RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        self.rewards.lin_vel_z_l2.weight = 0.0
+        self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.undesired_contacts = None
-        self.rewards.flat_orientation_l2.weight = -1.0
-        self.rewards.action_rate_l2.weight = -0.005
-        self.rewards.dof_acc_l2.weight = -1.25e-7
+        self.rewards.flat_orientation_l2.weight = -2.0
+        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.dof_acc_l2.weight = -2.5e-7
         self.rewards.dof_acc_l2.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS)
         self.rewards.dof_torques_l2.weight = 0.0
         self.rewards.dof_torques_l2.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS)

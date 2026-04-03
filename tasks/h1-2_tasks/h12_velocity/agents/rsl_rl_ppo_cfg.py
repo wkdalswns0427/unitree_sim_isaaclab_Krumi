@@ -9,6 +9,7 @@ class H12RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 3000
     save_interval = 50
     experiment_name = "h12_velocity_rough"
+    logger = "tensorboard"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_obs_normalization=False,
@@ -40,10 +41,8 @@ class H12RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 class H12FlatPPORunnerCfg(H12RoughPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.max_iterations = 1000
+        self.max_iterations = 5000
         self.experiment_name = "h12_velocity_flat"
-        self.policy.actor_hidden_dims = [128, 128, 128]
-        self.policy.critic_hidden_dims = [128, 128, 128]
 
 
 @configclass

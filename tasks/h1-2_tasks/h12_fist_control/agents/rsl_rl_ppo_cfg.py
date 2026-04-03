@@ -6,11 +6,11 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 
 @configclass
-class MoveCylinderH12InspireWholebodyPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+class FistControlH12PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 3000
+    max_iterations = 1500
     save_interval = 50
-    experiment_name = "h12_move_cylinder_wholebody"
+    experiment_name = "h12_fist_control"
     logger = "tensorboard"
     obs_groups = {
         "policy": ["policy"],
@@ -18,12 +18,13 @@ class MoveCylinderH12InspireWholebodyPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     }
 
     policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
+        init_noise_std=0.5,
         noise_std_type="log",
         actor_obs_normalization=False,
         critic_obs_normalization=False,
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+        # Smaller network — only 12-DOF finger task.
+        actor_hidden_dims=[128, 64],
+        critic_hidden_dims=[128, 64],
         activation="elu",
     )
 
@@ -34,7 +35,7 @@ class MoveCylinderH12InspireWholebodyPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.005,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1.0e-3,
+        learning_rate=3.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
