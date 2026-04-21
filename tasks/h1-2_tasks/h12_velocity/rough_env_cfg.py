@@ -54,10 +54,13 @@ ARM_JOINTS = [
 
 @configclass
 class H12Rewards(RewardsCfg):
+    # ── Safety ────────────────────────────────────────────────────────────────
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
+
+    # ── Primary tracking ──────────────────────────────────────────────────────
     track_lin_vel_xy_exp = RewTerm(
         func=mdp.track_lin_vel_xy_yaw_frame_exp,
-        weight=2.0,
+        weight=1.5,
         params={"command_name": "base_velocity", "std": 0.5},
     )
     track_ang_vel_z_exp = RewTerm(
@@ -65,42 +68,70 @@ class H12Rewards(RewardsCfg):
         weight=1.0,
         params={"command_name": "base_velocity", "std": 0.5},
     )
+
+    # ── Gait shaping ──────────────────────────────────────────────────────────
+    # Biped stepping: reward single-stance, shorter threshold = more frequent steps
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_positive_biped,
-        weight=0.25,
+        weight=0.75,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "threshold": 0.4,
+            "threshold": 0.35,
         },
     )
+    # Penalize foot slip — critical for sim-to-real transfer
     feet_slide = RewTerm(
         func=mdp.feet_slide,
-        weight=-0.25,
+        weight=-0.4,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
         },
     )
+
+    # ── Whole-body stability ──────────────────────────────────────────────────
+    # Maintain pelvis height — prevents excessive crouch and stumbling
+    base_height_l2 = RewTerm(
+        func=mdp.base_height_l2,
+        weight=-0.5,
+        params={"target_height": 0.98},
+    )
+
+    # ── Joint limits (lower body — ankles are the tightest) ──────────────────
     dof_pos_limits = RewTerm(
         func=mdp.joint_pos_limits,
         weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=ANKLE_JOINTS)},
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS)},
     )
+
+    # ── Posture regularization ────────────────────────────────────────────────
+    # Hip yaw/roll — keep feet under hips, prevent lateral drift
     joint_deviation_hip = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint"])},
     )
+    # Arms — small weight so natural counterbalance swing is still allowed
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-0.2,
+        weight=-0.1,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=ARM_JOINTS)},
     )
+    # Torso — increased from 0.1; key for H1-2 upper-body stability
     joint_deviation_torso = RewTerm(
         func=mdp.joint_deviation_l1,
         weight=-0.1,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names="torso_joint")},
+    )
+    # Penalize any joint motion when standing still — reduces jitter at zero command
+    stand_still = RewTerm(
+        func=mdp.stand_still_joint_deviation_l1,
+        weight=-0.5,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS),
+        },
     )
 
 
@@ -127,7 +158,7 @@ class H12RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/torso_link"
 
         self.actions.joint_pos.joint_names = LOCOMOTION_JOINT_NAMES
-        self.actions.joint_pos.scale = 0.5
+        self.actions.joint_pos.scale = 0.75
         self.actions.joint_pos.preserve_order = True
 
         self.observations.policy.joint_pos.params = {
@@ -154,17 +185,19 @@ class H12RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        self.rewards.lin_vel_z_l2.weight = -2.0
+        self.rewards.lin_vel_z_l2.weight = -0.5
+        self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.undesired_contacts = None
-        self.rewards.flat_orientation_l2.weight = -2.0
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.flat_orientation_l2.weight = -1.0
+        self.rewards.action_rate_l2.weight = -0.005
         self.rewards.dof_acc_l2.weight = -2.5e-7
         self.rewards.dof_acc_l2.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS)
-        self.rewards.dof_torques_l2.weight = 0.0
+        # Enable energy efficiency penalty (was 0.0)
+        self.rewards.dof_torques_l2.weight = -1.0e-7
         self.rewards.dof_torques_l2.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=LOWER_BODY_JOINTS)
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 3.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
 
         self.terminations.base_contact.params["sensor_cfg"].body_names = "torso_link"

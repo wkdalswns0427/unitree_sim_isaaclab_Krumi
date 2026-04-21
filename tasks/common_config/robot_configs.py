@@ -24,20 +24,20 @@ class RobotJointTemplates:
     def get_leg_joints(cls) -> Dict[str, float]:
         """get the default position of the leg joints"""
         return {
-            # left leg joint - locked in standing position
-            "left_hip_pitch_joint": 0.0,
+            # left leg joint - slight knee-bent standing pose
+            "left_hip_pitch_joint": -0.4,
             "left_hip_roll_joint": 0.0,
             "left_hip_yaw_joint": 0.0,
-            "left_knee_joint": 0.0,
-            "left_ankle_pitch_joint": 0.0,
+            "left_knee_joint": 0.8,
+            "left_ankle_pitch_joint": -0.4,
             "left_ankle_roll_joint": 0.0,
-            
-            # right leg joint - locked in standing position
-            "right_hip_pitch_joint": 0.0,
+
+            # right leg joint
+            "right_hip_pitch_joint": -0.4,
             "right_hip_roll_joint": 0.0,
             "right_hip_yaw_joint": 0.0,
-            "right_knee_joint": 0.0,
-            "right_ankle_pitch_joint": 0.0,
+            "right_knee_joint": 0.8,
+            "right_ankle_pitch_joint": -0.4,
             "right_ankle_roll_joint": 0.0,
         }
     

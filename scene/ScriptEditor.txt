@@ -1,0 +1,28 @@
+from omni.isaac.dynamic_control import _dynamic_control
+dc = _dynamic_control.acquire_dynamic_control_interface()
+
+art = dc.get_articulation("/World/h1_2_with_FTP_hand/pelvis")
+n = dc.get_articulation_dof_count(art)
+print(f"DOFs: {n}")
+
+targets = {
+    "left_hip_pitch_joint": -0.20,
+    "right_hip_pitch_joint": -0.20,
+    "left_knee_joint": 0.42,
+    "right_knee_joint": 0.42,
+    "left_ankle_pitch_joint": -0.23,
+    "right_ankle_pitch_joint": -0.23,
+}
+
+for i in range(n):
+    dof = dc.get_articulation_dof(art, i)
+    name = dc.get_dof_name(dof)
+    props = dc.get_dof_properties(dof)
+    props.stiffness = 300.0
+    props.damping = 20.0
+    dc.set_dof_properties(dof, props)
+    if name in targets:
+        dc.set_dof_position_target(dof, targets[name])
+        print(f"  set {name} = {targets[name]}")
+
+print("done")

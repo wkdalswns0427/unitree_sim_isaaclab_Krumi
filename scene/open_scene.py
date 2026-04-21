@@ -54,31 +54,68 @@ def main() -> None:
             raise RuntimeError(f"Failed to open scene: {scene_path}")
 
         stage = usd_ctx.get_stage()
-
-        # Set H1-2 to basic knee-bent stance.
-        h12_stance = {
-            "left_hip_pitch_joint":  -0.20,
-            "right_hip_pitch_joint": -0.20,
-            "left_knee_joint":        0.42,
-            "right_knee_joint":       0.42,
-            "left_ankle_pitch_joint": -0.23,
-            "right_ankle_pitch_joint":-0.23,
-        }
-        h12_joints_base = "/h1_2_with_FTP_hand/joints"
-        for joint_name, target in h12_stance.items():
-            prim = stage.GetPrimAtPath(f"{h12_joints_base}/{joint_name}")
-            if prim.IsValid():
-                attr = prim.GetAttribute("drive:angular:physics:targetPosition")
-                if attr.IsValid():
-                    attr.Set(float(target))
-                attr_kp = prim.GetAttribute("drive:angular:physics:stiffness")
-                if attr_kp.IsValid():
-                    attr_kp.Set(140.0)
-                attr_kd = prim.GetAttribute("drive:angular:physics:damping")
-                if attr_kd.IsValid():
-                    attr_kd.Set(10.0)
-
         omni.timeline.get_timeline_interface().play()
+        simulation_app.update()  # one frame so PhysX creates the articulation
+
+        from omni.isaac.dynamic_control import _dynamic_control
+        from pxr import UsdPhysics
+
+        dc = _dynamic_control.acquire_dynamic_control_interface()
+
+        # Find articulation root
+        art_root = None
+        for prim in stage.Traverse():
+            if str(prim.GetPath()).startswith("/World/h1_2_with_FTP_hand") and prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+                art_root = str(prim.GetPath())
+                break
+
+        h12_stance = {
+            "left_hip_pitch_joint":    -0.28,
+            "right_hip_pitch_joint":   -0.28,
+            "left_hip_roll_joint":      0.0,
+            "right_hip_roll_joint":     0.0,
+            "left_hip_yaw_joint":       0.0,
+            "right_hip_yaw_joint":      0.0,
+            "left_knee_joint":          0.70,
+            "right_knee_joint":         0.70,
+            "left_ankle_pitch_joint":  -0.42,
+            "right_ankle_pitch_joint": -0.42,
+            "left_ankle_roll_joint":    0.0,
+            "right_ankle_roll_joint":   0.0,
+            "torso_joint":              0.0,
+            "left_shoulder_pitch_joint":  0.30,
+            "right_shoulder_pitch_joint": 0.30,
+            "left_shoulder_roll_joint":   0.20,
+            "right_shoulder_roll_joint": -0.20,
+            "left_elbow_joint":           0.50,
+            "right_elbow_joint":          0.50,
+        }
+
+        if art_root:
+            art = dc.get_articulation(art_root)
+            if art != _dynamic_control.INVALID_HANDLE:
+                n = dc.get_articulation_dof_count(art)
+                name_to_dof = {}
+                for i in range(n):
+                    dof = dc.get_articulation_dof(art, i)
+                    name = dc.get_dof_name(dof)
+                    name_to_dof[name] = dof
+                    props = dc.get_dof_properties(dof)
+                    props.stiffness = 300.0
+                    props.damping = 20.0
+                    dc.set_dof_properties(dof, props)
+
+                # Teleport to stance
+                dof_states = dc.get_articulation_dof_states(art, _dynamic_control.STATE_POS)
+                for idx, name in enumerate(name_to_dof.keys()):
+                    if name in h12_stance:
+                        dof_states["pos"][idx] = h12_stance[name]
+                dc.set_articulation_dof_states(art, dof_states, _dynamic_control.STATE_POS)
+
+                for name, q in h12_stance.items():
+                    if name in name_to_dof:
+                        dc.set_dof_position_target(name_to_dof[name], q)
+                print(f"[INFO] Stance applied to {art_root}")
 
         print(f"[INFO] Opened scene: {scene_path}")
         while simulation_app.is_running():

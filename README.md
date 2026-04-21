@@ -136,7 +136,99 @@ python sim_main.py \
   --model_path logs/rsl_rl/h12_move_cylinder_wholebody/<run_timestamp>/exported/policy.onnx
 ```
 
-## 5. Replay Existing Dataset
+## 5. H1-2 Locomotion (Velocity Walking) Training
+
+### Available tasks
+
+| Task ID | Terrain | Notes |
+|---|---|---|
+| `Isaac-H12-Velocity-ManagerBased-v0` | Flat | Main locomotion task, 21-DOF control |
+
+### Train
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task Isaac-H12-Velocity-ManagerBased-v0 \
+  --device cuda --headless \
+  --num_envs 4096 \
+  --max_iterations 5000
+```
+
+Use `--num_envs 1024` if VRAM is limited. Logs and checkpoints go to:
+```
+logs/rsl_rl/h12_velocity_flat/<timestamp>/
+logs/rsl_rl/h12_velocity_flat/<timestamp>/exported/policy.onnx   ← auto-exported
+```
+
+Monitor training with TensorBoard:
+```bash
+tensorboard --logdir logs/rsl_rl/h12_velocity_flat
+```
+
+### Play
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task Isaac-H12-Velocity-ManagerBased-v0 \
+  --num_envs 8 \
+  --checkpoint logs/rsl_rl/h12_velocity_flat/<timestamp>/model_5000.pt
+```
+
+Pass `--num_envs 1` for cleaner single-robot debugging.
+
+### Key config files
+
+| File | What to tune |
+|---|---|
+| `tasks/h1-2_tasks/h12_velocity/rough_env_cfg.py` | Rewards, scene, actuator gains, command ranges |
+| `tasks/h1-2_tasks/h12_velocity/flat_env_cfg.py` | Flat-terrain overrides, play config |
+| `tasks/h1-2_tasks/h12_velocity/agents/rsl_rl_ppo_cfg.py` | Network size, learning rate, iterations |
+
+### Reward composition (current)
+
+Defined in `H12Rewards` inside `rough_env_cfg.py`, with `__post_init__` overrides:
+
+| Term | Weight | Purpose |
+|---|---|---|
+| `track_lin_vel_xy_exp` | +1.5 | Forward/lateral velocity tracking |
+| `track_ang_vel_z_exp` | +1.0 | Yaw tracking |
+| `feet_air_time_positive_biped` | +0.75, thr=0.35s | Forces clear foot lift |
+| `feet_slide` | -0.4 | Penalizes foot slip during contact |
+| `base_height_l2` | -0.5, target=0.98m | Prevents excessive crouching |
+| `flat_orientation_l2` | -1.0 | Keeps torso upright |
+| `lin_vel_z_l2` | -0.5 | Penalizes vertical bouncing |
+| `ang_vel_xy_l2` | -0.05 | Penalizes roll/pitch rate |
+| `dof_torques_l2` | -1e-7 | Energy efficiency (lower body) |
+| `dof_acc_l2` | -2.5e-7 | Joint smoothness (lower body) |
+| `action_rate_l2` | -0.005 | Smooth action changes |
+| `joint_deviation_hip` | -0.2 | Hip yaw/roll near zero |
+| `joint_deviation_arms` | -0.1 | Arms near default (allow swing) |
+| `joint_deviation_torso` | -0.1 | Torso joint near zero |
+| `stand_still` | -0.5 | No jitter at zero command |
+| `dof_pos_limits` | -1.0 | All lower-body joint limits |
+| `termination_penalty` | -200.0 | Discourages falls |
+
+### PPO config (current)
+
+- Network: `[512, 256, 128]` ELU (actor + critic)
+- Action scale: `0.75` (applied to delta from default joint positions)
+- `entropy_coef`: `0.01`, `learning_rate`: `1e-3`, `desired_kl`: `0.01`
+- 21 controlled joints: 12 leg + 1 torso + 4 left arm + 4 right arm (no wrists)
+
+### Checkpoint compatibility
+
+Older checkpoints trained with `log_std` (pre-rsl_rl API change) are auto-migrated on load. No manual patching needed.
+
+### Common issues
+
+- **Shuffling / stiff legs**: increase `feet_air_time` weight, check `action_scale` is `0.75`, remove any knee joint deviation penalty.
+- **Falls backward**: ankle pitch too positive; try moving `ankle_pitch` default toward `-0.3` in `robot_configs.py`.
+- **Falls forward**: ankle pitch too negative; try `-0.22`.
+- **Architecture mismatch on load**: the PPO config network shape must match the checkpoint. Old checkpoints used `[128, 128, 128]`.
+
+---
+
+## 6. Replay Existing Dataset
 
 Use replay mode to load existing `data.json` episodes:
 
